@@ -1,13 +1,16 @@
 import pandas as pd
 import itertools
+import sys
 
 class WeatherData(object):
 
-	def __init__(self, cleanedName):
+	def __init__(self, cleanedName, mainDataTypes=[]):
+		self.cleanedName = cleanedName.split('_')[1]
 		self.cleanedDF = pd.read_csv((cleanedName +'.csv'))
 		self.baseColumns = ['STATION_CODE','YEAR']
-		self.stationInfo = ['LATITUDE','LONGITUDE','ELEVATION','STATE','CITY']
-		self.mainDataTypes = ['PREP','SNOW','SNWD','TMAX','TMIN','AWDR','AWND','EVAP','WSFG']
+		self.mainDataTypes = list(set(['PRCP','SNOW','SNWD','TMAX','TMIN']+mainDataTypes))
+		self.stationStatHeaders = ['LATITUDE','LONGITUDE','ELEVATION','STATION_NAME']
+		self.stationStats = None
 
 		self.code = self.cleanedDF.iloc[0]['V1']
 		self.years = ((self.cleanedDF.iloc[1]).tolist())[1:]
@@ -17,12 +20,12 @@ class WeatherData(object):
 		self.firstUsage = True
 
 	# ---------- USER LEVEL FUNCTIONS -----------------
-	def getFullCSV(self, asDF=False): 
+	def getFullCSV(self): 
 		self.firstTimeUseCheck()
 		fullDF, firstLoop = None, True
 
 		for year in set(self.years):
-			for month in set(self.months):
+			for month in sorted(set(self.months)):
 				if(firstLoop):
 					firstLoop = False
 					fullDF = self.createFormattedCSV(year, month, True)
@@ -30,17 +33,24 @@ class WeatherData(object):
 					monthDF = self.createFormattedCSV(year, month, True)
 					fullDF = fullDF.append(monthDF, ignore_index=True)
 
-		if (asDF):
-			csvName = self.code + '_' + str(year) + '.csv'
-			fullDF.to_csv(csvName, encoding='utf-8', index=False)
-		else:
-			return fullDF
+		csvName = self.code + '_' + str(year) + '.csv'
+		fullDF.to_csv(csvName, encoding='utf-8', index=False)
 
 	# ---------- FORMATTING FUNCTIONS -----------------
 	def firstTimeUseCheck(self):
 		if (self.firstUsage):
 			self.firstUsage = False
-			self.formatCleanedDF()	
+			self.formatCleanedDF()
+			self.getStationData()
+
+	def getStationData(self):
+		import csv
+		with open('stations.csv') as stations:
+		    csvReader = csv.reader(stations)
+		    for row in csvReader:
+		        if (row[0] == self.cleanedName):
+		        	self.stationStats = tuple(row)[1:]
+		        	break
 
 	def createFormattedCSV(self, year, month, appendMode=False):
 		emptyDF = self.createEmptyDataframe()
@@ -63,13 +73,14 @@ class WeatherData(object):
 	def createEmptyDataframe(self):
 		
 		days, uniqueYears = 31, set(self.years)
-		dfColumns = self.baseColumns + self.stationInfo + self.mainDataTypes
+		dfColumns = self.baseColumns + self.stationStatHeaders + self.mainDataTypes
 		allYearsInDF = [[year]*days for year in uniqueYears]
 		allYearsInDF = list(itertools.chain.from_iterable(allYearsInDF))
 		baseTuples = [(self.code, year) for year in allYearsInDF]
 
-		naTuples = [('NA',)*(len(self.stationInfo)+len(self.mainDataTypes)) for i in range(days*len(uniqueYears))]
-		dfTuples = [tuple(i+j) for i,j in zip(baseTuples, naTuples)]
+		naTuples = [('NA',)*(len(self.mainDataTypes)) for i in range(days*len(uniqueYears))]
+		stationTuples = [self.stationStats for i in range(days*len(uniqueYears))]
+		dfTuples = [tuple(i+j+k) for i,j,k in zip(baseTuples, stationTuples, naTuples)]
 
 		return pd.DataFrame(dfTuples, columns=dfColumns)
 
@@ -85,8 +96,13 @@ class WeatherData(object):
 
 		return emptyDF[emptyDF['YEAR'] == str(year)]
 
-# -------- CLASS TESTING BELOW ------------------------
+# -------- SCRIPT EXECUTION BELOW ------------------------
 
 if __name__ == "__main__":
-	data = WeatherData(cleanedName='CleanedACW00011604')
-	data.getFullCSV()
+	if (len(sys.argv) > 2):
+		data = WeatherData(cleanedName=str(sys.argv[1]), mainDataTypes=sys.argv[2:])
+		data.getFullCSV()
+	else:
+		data = WeatherData(cleanedName=str(sys.argv[1]))
+		data.getFullCSV()
+
